@@ -8,11 +8,11 @@
 装好插件后，你不用再打开浏览器建 Key、抄 Base URL、手写模型列表——在 DSH 的「设置 → 中转站账户」里注册一次，点一下同步，模型就直接出现在模型选择器里。
 
 <p align="center">
-  <img src="assets/promo.gif" alt="情话中转站 DSH 插件演示" width="560" />
+  <img src="assets/promo.gif" alt="情话中转站 DSH 插件演示" width="760" />
 </p>
 
 <p align="center">
-  <a href="assets/promo-1080.mp4">▶ 高清演示视频（1080×1080，13 秒）</a>
+  <a href="assets/promo-1080.mp4">▶ 高清演示视频（1920×1080，22 秒）</a>
 </p>
 
 ---
