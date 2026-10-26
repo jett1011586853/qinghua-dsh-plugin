@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="Qinghua Relay">
+  <defs>
+    <linearGradient id="qh-g" x1="8" y1="6" x2="56" y2="58" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#5b8cff"/>
+      <stop offset="1" stop-color="#8f5bff"/>
+    </linearGradient>
+  </defs>
+  <rect x="4" y="4" width="56" height="56" rx="16" fill="url(#qh-g)"/>
+  <path d="M20 21.5h24a4 4 0 0 1 4 4v13a4 4 0 0 1-4 4H32.6L24 49v-6.5h-4a4 4 0 0 1-4-4v-13a4 4 0 0 1 4-4z" fill="#ffffff" fill-opacity="0.94"/>
+  <path d="M32 28.2c-1.6-2.1-5.2-1.9-6.4.6-1.1 2.3.4 4.5 2.4 6.1L32 38l4-3.1c2-1.6 3.5-3.8 2.4-6.1-1.2-2.5-4.8-2.7-6.4-.6z" fill="#6d5cff"/>
+</svg>

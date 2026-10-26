@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "情话中转站账户",
+    "description": "在设置里用邮箱注册情话中转站，自动创建 Claude / OpenAI 分组 API Key 并导入 DSH 模型，支持余额查看与充值。"
+  }
+}

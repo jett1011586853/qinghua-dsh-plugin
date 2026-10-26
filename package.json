@@ -1,0 +1,27 @@
+{
+  "name": "@local/qinghua-relay",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "情话中转站账户：邮箱注册、自动创建分组 API Key、导入 DSH 模型路由、余额充值。",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg"
+  ],
+  "dsh": {
+    "bundle": { "patch": "./cordis.patch.yml" },
+    "client": {
+      "platform": "web",
+      "immediately": true
+    }
+  }
+}

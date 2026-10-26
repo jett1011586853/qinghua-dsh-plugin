@@ -1,0 +1,8 @@
+node_modules/
+_research/
+.private/
+*.sqlite
+*.sqlite-*
+*.log
+.DS_Store
+Thumbs.db

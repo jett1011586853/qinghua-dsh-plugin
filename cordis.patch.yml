@@ -1,0 +1,5 @@
+- insert:
+    - id: qinghua-relay
+      name: '@local/qinghua-relay'
+      config:
+        baseUrl: https://qinghuaend.cn
