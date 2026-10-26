@@ -12,7 +12,7 @@
 </p>
 
 <p align="center">
-  <a href="assets/promo-1080.mp4">▶ 高清演示视频（1920×1080，26 秒，含中文配音与配乐）</a>
+  <a href="assets/promo-1080.mp4">▶ 高清演示视频（1920×1080，26 秒，含小米 MiMo 配音与原创配乐）</a>
 </p>
 
 ---
