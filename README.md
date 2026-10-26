@@ -47,9 +47,15 @@
 
 ## 安装
 
+**仓库地址**：https://github.com/jett1011586853/qinghua-dsh-plugin
+
 ### 方式一：Agent 安装（推荐）
 
-把仓库下载到本地后，在 DSH 里新建一个会话，把仓库路径发给 Agent 并说：
+```bash
+git clone https://github.com/jett1011586853/qinghua-dsh-plugin.git
+```
+
+在 DSH 里新建一个会话，把克隆下来的目录发给 Agent 并说：
 
 ```
 帮我安装这个 DSH 插件：<仓库绝对路径>
@@ -59,7 +65,7 @@ Agent 会调用插件管理器完成安装。
 
 ### 方式二：手动安装
 
-1. 下载本仓库到本地目录；
+1. 克隆或下载本仓库到本地目录；
 2. 在 DSH 中让 Agent 执行：`plugin_manager install_bundle <仓库绝对路径>`；
 3. 刷新 DSH 页面。
 
