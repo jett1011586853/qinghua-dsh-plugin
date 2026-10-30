@@ -12,6 +12,46 @@ window.__ModuleLoader__.load({
     const { useCallback, useEffect, useMemo, useRef, useState } = React
 
     const ENDPOINT = 'api/qinghua.relay'
+    const UPDATE_API = 'https://api.github.com/repos/jett1011586853/qinghua-dsh-plugin/commits/main'
+    const UPDATE_TARBALL = 'https://codeload.github.com/jett1011586853/qinghua-dsh-plugin/tar.gz'
+
+    const requestId = () => {
+      if (globalThis.crypto && typeof globalThis.crypto.randomUUID === 'function') return globalThis.crypto.randomUUID()
+      return `qinghua-update-${Date.now()}-${Math.random().toString(36).slice(2)}`
+    }
+
+    async function latestPluginTarget() {
+      try {
+        const response = await fetch(UPDATE_API, {
+          headers: { accept: 'application/vnd.github+json' },
+          cache: 'no-store',
+        })
+        if (response.ok) {
+          const payload = await response.json()
+          const sha = typeof payload.sha === 'string' ? payload.sha.trim() : ''
+          if (sha) return { spec: `${UPDATE_TARBALL}/${sha}`, label: sha.slice(0, 7) }
+        }
+      } catch { /* use the branch tarball when the GitHub API is unavailable */ }
+      return { spec: `${UPDATE_TARBALL}/refs/heads/main?dsh_update=${Date.now()}`, label: 'main' }
+    }
+
+    async function updatePlugin(remote) {
+      const manager = remote && remote.pluginManager
+      if (!manager || typeof manager.installBundle !== 'function') {
+        throw new Error('当前 DSH 没有可用的插件安装接口，请先更新 DSH 后再试。')
+      }
+      const target = await latestPluginTarget()
+      const result = await manager.installBundle(target.spec, {
+        enabled: true,
+        saveExact: true,
+        requestId: requestId(),
+      })
+      if (!result || result.ok === false) {
+        throw new Error((result && result.error && result.error.message) || '插件更新失败，请打开插件管理器查看安装日志。')
+      }
+      const change = result.ok === true ? result.value : result
+      return { target, change }
+    }
 
     async function rpc(action, payload) {
       const response = await fetch(new URL(ENDPOINT, document.baseURI), {
@@ -293,12 +333,26 @@ window.__ModuleLoader__.load({
       )
     }
 
-    function RelayAccountPage() {
+    function RelayAccountPage({ remote }) {
       const [loading, setLoading] = useState(true)
       const [busy, setBusy] = useState(false)
       const [error, setError] = useState('')
       const [notice, setNotice] = useState('')
       const [status, setStatus] = useState(null)
+
+      const runUpdate = useCallback(async () => {
+        setError(''); setNotice(''); setBusy(true)
+        try {
+          const { target, change } = await updatePlugin(remote)
+          const application = change && change.application
+          const message = application === 'restart-required'
+            ? '更新文件已安装，重启 DSH 后新版会生效。'
+            : '新版已安装，刷新页面即可继续使用。'
+          setNotice(`插件已更新到 ${target.label}。\n${message}`)
+        } catch (failure) {
+          setError(failure.message)
+        } finally { setBusy(false) }
+      }, [remote])
 
       const reload = useCallback(async () => {
         setLoading(true)
@@ -314,8 +368,11 @@ window.__ModuleLoader__.load({
 
       return h('div', { className: 'qh-relay', style: styles.root },
         h('style', null, css),
-        h('h2', { style: { ...styles.title, fontSize: 17 } }, '中转站账户'),
+        h('div', { style: { ...styles.row, alignItems: 'center', justifyContent: 'space-between' } },
+          h('h2', { style: { ...styles.title, fontSize: 17 } }, '中转站账户'),
+          h('button', { style: styles.button, disabled: busy, onClick: runUpdate }, busy ? '更新中…' : '检查并更新插件')),
         h('p', { style: styles.hint }, '点一次即可：按站点模型广场的清单把「分组 → 模型」同步进 DSH 模型页；站点上已下线的分组会一并移除。'),
+        h('p', { style: styles.hint }, '更新按钮会从插件仓库安装最新版本，已有登录状态、API Key 和模型配置会保留。'),
         error ? h('div', { style: styles.error }, error) : null,
         notice ? h('div', { style: styles.notice }, notice) : null,
         loading ? h('p', { style: styles.hint }, '读取中…') : null,
@@ -331,7 +388,7 @@ window.__ModuleLoader__.load({
     }
 
     return {
-      inject: ['slots'],
+      inject: ['slots', 'remote', 'remote.pluginManager'],
       apply(ctx) {
         const label = () => {
           try {
@@ -346,7 +403,7 @@ window.__ModuleLoader__.load({
           id: 'qinghua-account',
           order: -9,
           label,
-        }, RelayAccountPage))
+        }, () => h(RelayAccountPage, { remote: ctx.remote })))
       },
     }
   },

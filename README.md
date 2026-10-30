@@ -51,7 +51,7 @@
 - 导入时已声明图片输入、100 万上下文、全档位推理强度，选模型即可用；
 - 视频类分组（如 seedance）不会进入对话模型列表。
 
-DeepSeek 分组固定导入为 OpenAI Responses 路由（`/v1/responses`），Claude 分组固定导入为 Anthropic Messages（`/v1/messages`）。这样可以避免 DeepSeek 的 DSML/工具调用格式混杂，同时保留 Claude 原生协议。DeepSeek 模型同步为 1M 上下文、384K 最大输出、文字和图片输入；Claude 与 GPT 同步为 1M 上下文、128K 最大输出、文字和图片输入。旧版本已经生成的 `qinghua-*` 路由会在插件加载时自动迁移。
+DeepSeek 分组固定导入为 OpenAI Responses 路由（`/v1/responses`），Claude 分组固定导入为 Anthropic Messages（`/v1/messages`）。Claude 5.5 路由会声明自适应思考兼容参数，让 DSH 发送上游要求的 `thinking.type=adaptive` 和 effort，而不是旧式 `thinking.type=enabled`。这样可以避免 DeepSeek 的 DSML/工具调用格式混杂，同时保留 Claude 原生协议。DeepSeek 模型同步为 1M 上下文、384K 最大输出、文字和图片输入；Claude 与 GPT 同步为 1M 上下文、128K 最大输出、文字和图片输入。旧版本已经生成的 `qinghua-*` 路由会在插件加载时自动迁移。
 
 ---
 
@@ -80,6 +80,8 @@ Agent 会调用插件管理器完成安装。
 3. 刷新 DSH 页面。
 
 安装完成后，左侧「设置」里会多出一项 **中转站账户**（在「账号」下面）。
+
+安装完成后，打开「设置 → 中转站账户」，点击右上角 **「检查并更新插件」** 即可从仓库安装最新版本。更新过程中会保留已有登录状态、API Key 和模型配置；如果页面提示需要重启，请重启 DSH。
 
 ---
 
@@ -128,7 +130,7 @@ config:
 
 ## 更新
 
-拉到最新代码后刷新页面，或在插件管理中重新安装。更新不会影响你已有的 Key 和模型配置。
+推荐直接在「设置 → 中转站账户」点击 **「检查并更新插件」**。按钮会读取仓库 `main` 分支的最新提交，并交给 DSH 插件管理器安装；更新不会影响你已有的 Key 和模型配置。若旧版本没有这个按钮，先按上面的手动安装方式更新一次。
 
 ---
 

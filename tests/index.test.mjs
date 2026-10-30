@@ -24,7 +24,7 @@ test('normalizes Claude relay routes to Anthropic Messages', () => {
   })
   assert.equal(provider.api, 'anthropic-messages')
   assert.equal(provider.baseURL, 'https://qinghuaend.cn')
-  assert.equal(provider.compat, undefined)
+  assert.deepEqual(provider.compat, { forceAdaptiveThinking: true })
   assert.deepEqual(provider.models[0].input, ['text', 'image'])
 })
 

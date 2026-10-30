@@ -24,13 +24,7 @@ const DEEPSEEK_MAX_TOKENS = 384000
 const STANDARD_MAX_TOKENS = 128000
 const REASONING_LEVELS = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']
 
-/**
- * Claude 5.5 家族只能走站点的 OpenAI 兼容桥（`/v1/chat/completions`）：
- * 原生 `/v1/messages` 要求 `thinking.type="adaptive"`，pi-ai 的 anthropic 协议只会发
- * 旧式 `{type:"enabled",budget_tokens}`，站点直接 400 "requires adaptive thinking"。
- * 桥上则没有这个限制，只是 effort 档位受限：`off` / `minimal` 会被拒
- * （"does not support reasoning effort … use low, medium, high, xhigh or max"）。
- */
+/** Claude 5.5 only exposes effort levels accepted by the upstream adaptive-thinking API. */
 const CLAUDE_ADAPTIVE_PATTERN = /claude-(?:opus|sonnet|haiku)-5-5|claude-fable-5/i
 const needsAdaptiveThinking = (modelId) => CLAUDE_ADAPTIVE_PATTERN.test(String(modelId || ''))
 const CLAUDE_EFFORT_LEVELS = ['low', 'medium', 'high', 'xhigh', 'max']
@@ -119,8 +113,8 @@ function normalizeRelayProviderValue(route, value) {
     api: deepseek ? 'openai-responses' : claude ? 'anthropic-messages' : 'openai-completions',
     baseURL: deepseek || claude ? relayOrigin(value.baseURL) : ensureOpenAIBaseUrl(value.baseURL),
     models: normalizeModelProfiles(models, deepseek ? 'deepseek' : ''),
+    ...(claude ? { compat: { forceAdaptiveThinking: true } } : {}),
   }
-  delete normalized.compat
   return normalized
 }
 
@@ -175,10 +169,10 @@ const looksAnthropic = (modelId) => ANTHROPIC_HINTS.some((hint) => String(modelI
 const NON_CHAT_PATTERN = /seedance|sora|dall-?e|gpt-image|image-|imagen|tts|audio|whisper|transcri|embed|rerank|moderation|veo|kling/i
 
 /**
- * 老版本插件把 Claude 分组导成了 pi-ai 的 `anthropic-messages`（原生 `/v1/messages`），
- * 这条路对 Claude 5.5 必然 400 "requires adaptive thinking"。这里在加载时静默改成
+ * 老版本插件可能缺少 Claude 的自适应思考兼容标记。这里在加载时静默迁移：
  * DeepSeek 走站点 OpenAI Responses（`/v1/responses`）；Claude 分组走原生
- * Anthropic Messages（`/v1/messages`）；GPT 分组走 OpenAI 兼容接口。
+ * Anthropic Messages（`/v1/messages`）并启用 adaptive thinking；GPT 分组走
+ * OpenAI 兼容接口。
  */
 async function migrateRelayRoutes(ctx) {
   try {
@@ -422,6 +416,7 @@ export function apply(ctx, config = {}) {
         ref,
         baseURL: deepseek || claude ? relayOrigin(baseUrl) : ensureOpenAIBaseUrl(baseUrl),
         api,
+        ...(claude ? { compat: { forceAdaptiveThinking: true } } : {}),
         models: finalIds,
       })
     }
