@@ -22,6 +22,17 @@ const ROUTE_PREFIX = 'qinghua-'
 const CONTEXT_WINDOW = 1000000
 const REASONING_LEVELS = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']
 
+/**
+ * Claude 5.5 家族只能走站点的 OpenAI 兼容桥（`/v1/chat/completions`）：
+ * 原生 `/v1/messages` 要求 `thinking.type="adaptive"`，pi-ai 的 anthropic 协议只会发
+ * 旧式 `{type:"enabled",budget_tokens}`，站点直接 400 "requires adaptive thinking"。
+ * 桥上则没有这个限制，只是 effort 档位受限：`off` / `minimal` 会被拒
+ * （"does not support reasoning effort … use low, medium, high, xhigh or max"）。
+ */
+const CLAUDE_ADAPTIVE_PATTERN = /claude-(?:opus|sonnet|haiku)-5-5|claude-fable-5/i
+const needsAdaptiveThinking = (modelId) => CLAUDE_ADAPTIVE_PATTERN.test(String(modelId || ''))
+const CLAUDE_EFFORT_LEVELS = ['low', 'medium', 'high', 'xhigh', 'max']
+
 const slug = (value) => String(value).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'group'
 const credentialRef = (group) => `QINGHUA_${slug(group).replace(/-/g, '_').toUpperCase()}_API_KEY`
 const keyName = (group) => `DSH \u00b7 ${group}`
@@ -46,11 +57,12 @@ function asArray(value, ...keys) {
 }
 
 function modelProfile(modelId) {
+  const levels = needsAdaptiveThinking(modelId) ? CLAUDE_EFFORT_LEVELS : REASONING_LEVELS
   return {
     id: modelId,
     contextWindow: CONTEXT_WINDOW,
     input: ['text', 'image'],
-    reasoningEfforts: Object.fromEntries(REASONING_LEVELS.map((level) => [level, level])),
+    reasoningEfforts: Object.fromEntries(levels.map((level) => [level, level])),
   }
 }
 
@@ -104,11 +116,75 @@ const looksAnthropic = (modelId) => ANTHROPIC_HINTS.some((hint) => String(modelI
 /** Families that are not chat models and must not appear in the composer picker. */
 const NON_CHAT_PATTERN = /seedance|sora|dall-?e|gpt-image|image-|imagen|tts|audio|whisper|transcri|embed|rerank|moderation|veo|kling/i
 
+/**
+ * 老版本插件把 Claude 分组导成了 pi-ai 的 `anthropic-messages`（原生 `/v1/messages`），
+ * 这条路对 Claude 5.5 必然 400 "requires adaptive thinking"。这里在加载时静默改成
+ * 站点 OpenAI 兼容桥（`/v1/chat/completions` + `thinkingFormat: deepseek`），
+ * 同时把 `off` / `minimal` 从这些模型的可选档位里去掉。
+ */
+async function migrateClaudeRoutes(ctx) {
+  try {
+    const ns = findPiAiNamespace(ctx)
+    const descriptor = ctx.settings.describe().find((entry) => entry.ns === ns)
+    const providers = (descriptor && descriptor.value && descriptor.value.providers) || {}
+    const ops = []
+    for (const [route, value] of Object.entries(providers)) {
+      if (!route.startsWith(ROUTE_PREFIX) || !value || !Array.isArray(value.models)) continue
+      const models = value.models.map((model) => (
+        typeof model === 'string' ? model : (model && typeof model === 'object' ? { ...model } : model)
+      ))
+      const ids = models.map((model) => (typeof model === 'string' ? model : model && model.id)).filter(Boolean)
+      const claude = ids.some(needsAdaptiveThinking)
+      let changed = false
+      for (const [index, model] of models.entries()) {
+        if (typeof model !== 'object' || !model) continue
+        if (!needsAdaptiveThinking(model.id)) continue
+        const current = model.reasoningEfforts && typeof model.reasoningEfforts === 'object' ? model.reasoningEfforts : null
+        const next = Object.fromEntries(CLAUDE_EFFORT_LEVELS.map((level) => [level, (current && current[level]) || level]))
+        if (!current || Object.keys(current).sort().join(',') !== Object.keys(next).sort().join(',')) {
+          models[index] = { ...model, reasoningEfforts: next }
+          changed = true
+        }
+      }
+      const base = String(value.baseURL || '').replace(/\/+$/, '')
+      const isChatBridge = value.api === 'openai-completions' && base.endsWith('/v1')
+      if (claude && !isChatBridge) {
+        ops.push({
+          op: 'set',
+          path: ['providers', route],
+          value: {
+            ...value,
+            api: 'openai-completions',
+            baseURL: base.endsWith('/v1') ? base : `${base}/v1`,
+            compat: { thinkingFormat: 'deepseek', supportsReasoningEffort: true },
+            models,
+          },
+        })
+        continue
+      }
+      if (claude && isChatBridge) {
+        const compat = value.compat || {}
+        if (compat.thinkingFormat !== 'deepseek' || compat.supportsReasoningEffort !== true) {
+          ops.push({
+            op: 'set',
+            path: ['providers', route],
+            value: { ...value, compat: { ...compat, thinkingFormat: 'deepseek', supportsReasoningEffort: true }, models },
+          })
+          continue
+        }
+      }
+      if (changed) ops.push({ op: 'set', path: ['providers', route], value: { ...value, models } })
+    }
+    if (ops.length) await ctx.settings.mutate(ns, ops)
+  } catch { /* settings not ready; provision will write the corrected compat later */ }
+}
+
 export const inject = ['connection', 'credentials', 'settings']
 
 export function apply(ctx, config = {}) {
   const baseUrl = normaliseBaseUrl(config.baseUrl)
   const api = createApi(`${baseUrl}/api/v1`, fetch)
+  void migrateClaudeRoutes(ctx)
 
   // Optional: routes whose reasoning channel should not be shown (an upstream model
   // that dumps draft answers / tool-call JSON into its CoT reads as noise).
