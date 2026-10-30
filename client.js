@@ -237,7 +237,7 @@ window.__ModuleLoader__.load({
         h('div', { style: styles.row },
           h('button', { style: styles.primary, onClick: provision }, '同步分组与模型'),
           h('button', { style: styles.button, onClick: async () => { setBusy(true); try { await rpc('logout'); await reload() } finally { setBusy(false) } } }, '退出登录')),
-        result ? h('p', { style: styles.hint }, `模型路由写入配置项 ${result.namespace}。DeepSeek 使用 Responses，Claude 使用 Anthropic Messages，GPT 使用 OpenAI 兼容协议。`) : null,
+        result ? h('p', { style: styles.hint }, `模型路由写入配置项 ${result.namespace}。所有支持的模型统一使用 OpenAI Responses 协议。`) : null,
       )
     }
 

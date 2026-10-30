@@ -42,16 +42,16 @@
 
 | 分组 | 协议 | 说明 |
 |---|---|---|
-| GPT_官key组 | OpenAI 兼容 | gpt-6.1-sol / gpt-6-astra / gpt-6-sol / gpt-6-luna / gpt-5.6-sol |
-| ccpro组 | Anthropic Messages | claude-fable-5 / claude-opus-5-5 / claude-sonnet-5-5 |
-| ccmax组 | Anthropic Messages | 同上，独立渠道 |
+| GPT_官key组 | OpenAI Responses | gpt-6.1-sol / gpt-6-astra / gpt-6-sol / gpt-6-luna / gpt-5.6-sol |
+| ccpro组 | OpenAI Responses | claude-fable-5 / claude-opus-5-5 / claude-sonnet-5-5 |
+| ccmax组 | OpenAI Responses | 同上，独立渠道 |
 | DeepSeek | OpenAI Responses | deepseek-v4.1-flash-1017 |
 
 - 模型清单一律以站点「模型广场」为准，不会导入你用不了的模型；
 - 导入时已声明图片输入、100 万上下文、全档位推理强度，选模型即可用；
 - 视频类分组（如 seedance）不会进入对话模型列表。
 
-DeepSeek 分组固定导入为 OpenAI Responses 路由（`/v1/responses`），Claude 分组固定导入为 Anthropic Messages（`/v1/messages`）。Claude 5.5 路由会声明自适应思考兼容参数，让 DSH 发送上游要求的 `thinking.type=adaptive` 和 effort，而不是旧式 `thinking.type=enabled`。这样可以避免 DeepSeek 的 DSML/工具调用格式混杂，同时保留 Claude 原生协议。DeepSeek 模型同步为 1M 上下文、384K 最大输出、文字和图片输入；Claude 与 GPT 同步为 1M 上下文、128K 最大输出、文字和图片输入。旧版本已经生成的 `qinghua-*` 路由会在插件加载时自动迁移。
+所有支持的分组固定导入为 OpenAI Responses 路由（`/v1/responses`），插件会统一使用站点根地址，让 DSH 自动拼接 Responses 端点。这样可以统一 Claude、DeepSeek 和 GPT 的请求体、流式事件与工具调用格式。DeepSeek 模型同步为 1M 上下文、384K 最大输出、文字和图片输入；Claude 与 GPT 同步为 1M 上下文、128K 最大输出、文字和图片输入。旧版本已经生成的 `qinghua-*` 路由会在插件加载时自动迁移。
 
 ---
 

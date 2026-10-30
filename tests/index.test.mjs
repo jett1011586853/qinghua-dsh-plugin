@@ -14,18 +14,29 @@ test('reads model ids from all supported plaza shapes', () => {
   assert.equal(modelIdOf({ name: 'deepseek-v4.1-flash-1017' }), 'deepseek-v4.1-flash-1017')
 })
 
-test('normalizes Claude relay routes to Anthropic Messages', () => {
+test('normalizes Claude relay routes to OpenAI Responses', () => {
   assert.equal(ensureOpenAIBaseUrl('https://qinghuaend.cn'), 'https://qinghuaend.cn/v1')
   assert.equal(ensureOpenAIBaseUrl('https://qinghuaend.cn/v1/'), 'https://qinghuaend.cn/v1')
   const provider = normalizeRelayProviderValue('qinghua-ccpro', {
     api: 'anthropic-messages',
-    baseURL: 'https://qinghuaend.cn',
+    baseURL: 'https://qinghuaend.cn/v1',
     models: [{ name: 'claude-opus-5-5' }],
   })
-  assert.equal(provider.api, 'anthropic-messages')
+  assert.equal(provider.api, 'openai-responses')
   assert.equal(provider.baseURL, 'https://qinghuaend.cn')
-  assert.deepEqual(provider.compat, { forceAdaptiveThinking: true })
+  assert.equal(provider.compat, undefined)
   assert.deepEqual(provider.models[0].input, ['text', 'image'])
+})
+
+test('normalizes GPT relay routes to OpenAI Responses', () => {
+  const provider = normalizeRelayProviderValue('qinghua-gpt-key', {
+    api: 'openai-completions',
+    baseURL: 'https://qinghuaend.cn/v1',
+    models: [{ id: 'gpt-6.1-sol' }],
+  })
+  assert.equal(provider.api, 'openai-responses')
+  assert.equal(provider.baseURL, 'https://qinghuaend.cn')
+  assert.equal(provider.compat, undefined)
 })
 
 test('uses Responses for DeepSeek and keeps its larger output limit', () => {

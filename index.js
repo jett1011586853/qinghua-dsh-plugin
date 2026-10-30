@@ -38,17 +38,15 @@ function normaliseBaseUrl(value) {
   return raw.replace(/\/+$/, '')
 }
 
-/** Anthropic groups are served at the origin; every OpenAI-compatible group at /v1. */
+/** The relay exposes every supported chat group through its OpenAI Responses endpoint. */
 function protocolFor(platform) {
   const value = String(platform || '').toLowerCase()
-  if (value.includes('claude') || value.includes('anthropic')) return 'anthropic'
   if (value.includes('gemini')) return 'gemini'
-  return 'openai'
+  return 'openai-responses'
 }
 
 const DEEPSEEK_MODEL_PATTERN = /(^|[\/:_-])deepseek([\/:_-]|$)/i
 const isDeepSeekModel = (modelId) => DEEPSEEK_MODEL_PATTERN.test(String(modelId || ''))
-const isClaudeModel = (modelId) => /(?:^|[\/:_-])claude[-_:]/i.test(String(modelId || ''))
 const lookupName = (value) => String(value || '').trim().toLowerCase()
 
 function modelIdOf(model) {
@@ -106,15 +104,14 @@ function normalizeRelayProviderValue(route, value) {
   if (!value || typeof value !== 'object') return value
   const models = Array.isArray(value.models) ? value.models : []
   const ids = uniqueModelIds(models)
-  const claude = ids.some(isClaudeModel) || /(?:ccpro|ccmax|anthropic)/i.test(route)
   const deepseek = ids.some(isDeepSeekModel) || /deepseek/i.test(route)
   const normalized = {
     ...value,
-    api: deepseek ? 'openai-responses' : claude ? 'anthropic-messages' : 'openai-completions',
-    baseURL: deepseek || claude ? relayOrigin(value.baseURL) : ensureOpenAIBaseUrl(value.baseURL),
+    api: 'openai-responses',
+    baseURL: relayOrigin(value.baseURL),
     models: normalizeModelProfiles(models, deepseek ? 'deepseek' : ''),
-    ...(claude ? { compat: { forceAdaptiveThinking: true } } : {}),
   }
+  delete normalized.compat
   return normalized
 }
 
@@ -163,8 +160,6 @@ function findPiAiNamespace(ctx) {
   return scored[0].descriptor.ns
 }
 
-const ANTHROPIC_HINTS = ['claude', 'anthropic', 'ccpro', 'ccmax', 'sonnet', 'opus', 'haiku']
-const looksAnthropic = (modelId) => ANTHROPIC_HINTS.some((hint) => String(modelId).toLowerCase().includes(hint))
 /** Families that are not chat models and must not appear in the composer picker. */
 const NON_CHAT_PATTERN = /seedance|sora|dall-?e|gpt-image|image-|imagen|tts|audio|whisper|transcri|embed|rerank|moderation|veo|kling/i
 
@@ -292,8 +287,8 @@ export function apply(ctx, config = {}) {
     }
   }
 
-  /** Fallback discovery: a gateway may return its whole catalogue, so filter by protocol. */
-  async function modelsForKey(secret, protocol) {
+  /** Fallback discovery: model plaza is authoritative; this only fills older deployments. */
+  async function modelsForKey(secret) {
     try {
       const response = await fetch(`${baseUrl}/v1/models`, {
         headers: { accept: 'application/json', authorization: `Bearer ${secret}` },
@@ -302,8 +297,7 @@ export function apply(ctx, config = {}) {
       const payload = await response.json()
       const list = asArray(payload, 'data', 'models', 'items')
       const ids = list.map((entry) => (typeof entry === 'string' ? entry : entry && (entry.id || entry.name))).filter(Boolean)
-      const matching = ids.filter((id) => (protocol === 'anthropic' ? looksAnthropic(id) : !looksAnthropic(id)))
-      return matching.length ? matching : ids
+      return ids
     } catch {
       return []
     }
@@ -395,7 +389,7 @@ export function apply(ctx, config = {}) {
 
       const plazaModels = plazaGroup ? asArray(plazaGroup, 'models') : []
       const modelIds = uniqueModelIds(plazaModels)
-      const fallback = modelIds.length ? [] : await modelsForKey(secret, protocol)
+      const fallback = modelIds.length ? [] : await modelsForKey(secret)
       // A chat route cannot serve video/image/TTS/embedding models; keep them out of the picker.
       const finalIds = (modelIds.length ? modelIds : fallback).filter((id) => !NON_CHAT_PATTERN.test(id))
       if (!finalIds.length) {
@@ -405,8 +399,7 @@ export function apply(ctx, config = {}) {
 
       const route = `${ROUTE_PREFIX}${slug(groupName)}`
       const deepseek = finalIds.some(isDeepSeekModel) || /deepseek/i.test(groupName)
-      const claude = finalIds.some(isClaudeModel) || /(?:ccpro|ccmax|anthropic)/i.test(groupName)
-      const api = deepseek ? 'openai-responses' : claude ? 'anthropic-messages' : 'openai-completions'
+      const api = 'openai-responses'
       liveRoutes.add(route)
       imported.push({
         group: groupName,
@@ -414,9 +407,8 @@ export function apply(ctx, config = {}) {
         protocol: api,
         route,
         ref,
-        baseURL: deepseek || claude ? relayOrigin(baseUrl) : ensureOpenAIBaseUrl(baseUrl),
+        baseURL: relayOrigin(baseUrl),
         api,
-        ...(claude ? { compat: { forceAdaptiveThinking: true } } : {}),
         models: finalIds,
       })
     }
