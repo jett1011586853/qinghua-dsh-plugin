@@ -18,8 +18,10 @@ const SESSION_REF = 'QINGHUA_RELAY_SESSION'
 const ROUTE_PATH = '/api/qinghua.relay'
 const ROUTE_PREFIX = 'qinghua-'
 
-/** Imported models declare vision input, a 1M window and every reasoning level. */
+/** Imported models declare vision input, a 1M window and the upstream output limit. */
 const CONTEXT_WINDOW = 1000000
+const DEEPSEEK_MAX_TOKENS = 384000
+const STANDARD_MAX_TOKENS = 128000
 const REASONING_LEVELS = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']
 
 /**
@@ -50,20 +52,76 @@ function protocolFor(platform) {
   return 'openai'
 }
 
+const DEEPSEEK_MODEL_PATTERN = /(^|[\/:_-])deepseek([\/:_-]|$)/i
+const isDeepSeekModel = (modelId) => DEEPSEEK_MODEL_PATTERN.test(String(modelId || ''))
+const isClaudeModel = (modelId) => /(?:^|[\/:_-])claude[-_:]/i.test(String(modelId || ''))
+const lookupName = (value) => String(value || '').trim().toLowerCase()
+
+function modelIdOf(model) {
+  if (typeof model === 'string') return model.trim()
+  if (!model || typeof model !== 'object') return ''
+  for (const key of ['id', 'model', 'model_id', 'modelId', 'name']) {
+    const value = typeof model[key] === 'string' ? model[key].trim() : ''
+    if (value) return value
+  }
+  return ''
+}
+
+function uniqueModelIds(models) {
+  return [...new Set(models.map(modelIdOf).filter(Boolean))]
+}
+
+function ensureOpenAIBaseUrl(value) {
+  const base = String(value || DEFAULT_BASE_URL).replace(/\/+$/, '')
+  return base.endsWith('/v1') ? base : `${base}/v1`
+}
+
+function relayOrigin(value) {
+  return String(value || DEFAULT_BASE_URL).replace(/\/+$/, '').replace(/\/v1$/i, '')
+}
+
 function asArray(value, ...keys) {
   if (Array.isArray(value)) return value
   for (const key of keys) if (value && Array.isArray(value[key])) return value[key]
   return []
 }
 
-function modelProfile(modelId) {
+function modelProfile(modelId, platform = '') {
   const levels = needsAdaptiveThinking(modelId) ? CLAUDE_EFFORT_LEVELS : REASONING_LEVELS
+  const deepseek = String(platform).toLowerCase().includes('deepseek') || isDeepSeekModel(modelId)
   return {
     id: modelId,
+    name: modelId,
     contextWindow: CONTEXT_WINDOW,
     input: ['text', 'image'],
+    maxTokens: deepseek ? DEEPSEEK_MAX_TOKENS : STANDARD_MAX_TOKENS,
     reasoningEfforts: Object.fromEntries(levels.map((level) => [level, level])),
   }
+}
+
+function normalizeModelProfiles(models, platform = '') {
+  return models.map((model) => {
+    const id = modelIdOf(model)
+    if (!id) return null
+    const original = model && typeof model === 'object' ? model : {}
+    return { ...original, ...modelProfile(id, platform) }
+  }).filter(Boolean)
+}
+
+function normalizeRelayProviderValue(route, value) {
+  if (!value || typeof value !== 'object') return value
+  const models = Array.isArray(value.models) ? value.models : []
+  const ids = uniqueModelIds(models)
+  const claude = ids.some(isClaudeModel) || /(?:ccpro|ccmax|anthropic)/i.test(route)
+  const deepseek = ids.some(isDeepSeekModel) || /deepseek/i.test(route)
+  const normalized = {
+    ...value,
+    api: deepseek ? 'openai-responses' : claude ? 'anthropic-messages' : 'openai-completions',
+    baseURL: deepseek || claude ? relayOrigin(value.baseURL) : ensureOpenAIBaseUrl(value.baseURL),
+    models: normalizeModelProfiles(models, deepseek ? 'deepseek' : ''),
+  }
+  delete normalized.compat
+  return normalized
 }
 
 function createApi(baseUrl, fetchImpl) {
@@ -119,10 +177,10 @@ const NON_CHAT_PATTERN = /seedance|sora|dall-?e|gpt-image|image-|imagen|tts|audi
 /**
  * 老版本插件把 Claude 分组导成了 pi-ai 的 `anthropic-messages`（原生 `/v1/messages`），
  * 这条路对 Claude 5.5 必然 400 "requires adaptive thinking"。这里在加载时静默改成
- * 站点 OpenAI 兼容桥（`/v1/chat/completions` + `thinkingFormat: deepseek`），
- * 同时把 `off` / `minimal` 从这些模型的可选档位里去掉。
+ * DeepSeek 走站点 OpenAI Responses（`/v1/responses`）；Claude 分组走原生
+ * Anthropic Messages（`/v1/messages`）；GPT 分组走 OpenAI 兼容接口。
  */
-async function migrateClaudeRoutes(ctx) {
+async function migrateRelayRoutes(ctx) {
   try {
     const ns = findPiAiNamespace(ctx)
     const descriptor = ctx.settings.describe().find((entry) => entry.ns === ns)
@@ -130,50 +188,10 @@ async function migrateClaudeRoutes(ctx) {
     const ops = []
     for (const [route, value] of Object.entries(providers)) {
       if (!route.startsWith(ROUTE_PREFIX) || !value || !Array.isArray(value.models)) continue
-      const models = value.models.map((model) => (
-        typeof model === 'string' ? model : (model && typeof model === 'object' ? { ...model } : model)
-      ))
-      const ids = models.map((model) => (typeof model === 'string' ? model : model && model.id)).filter(Boolean)
-      const claude = ids.some(needsAdaptiveThinking)
-      let changed = false
-      for (const [index, model] of models.entries()) {
-        if (typeof model !== 'object' || !model) continue
-        if (!needsAdaptiveThinking(model.id)) continue
-        const current = model.reasoningEfforts && typeof model.reasoningEfforts === 'object' ? model.reasoningEfforts : null
-        const next = Object.fromEntries(CLAUDE_EFFORT_LEVELS.map((level) => [level, (current && current[level]) || level]))
-        if (!current || Object.keys(current).sort().join(',') !== Object.keys(next).sort().join(',')) {
-          models[index] = { ...model, reasoningEfforts: next }
-          changed = true
-        }
+      const normalized = normalizeRelayProviderValue(route, value)
+      if (JSON.stringify(normalized) !== JSON.stringify(value)) {
+        ops.push({ op: 'set', path: ['providers', route], value: normalized })
       }
-      const base = String(value.baseURL || '').replace(/\/+$/, '')
-      const isChatBridge = value.api === 'openai-completions' && base.endsWith('/v1')
-      if (claude && !isChatBridge) {
-        ops.push({
-          op: 'set',
-          path: ['providers', route],
-          value: {
-            ...value,
-            api: 'openai-completions',
-            baseURL: base.endsWith('/v1') ? base : `${base}/v1`,
-            compat: { thinkingFormat: 'deepseek', supportsReasoningEffort: true },
-            models,
-          },
-        })
-        continue
-      }
-      if (claude && isChatBridge) {
-        const compat = value.compat || {}
-        if (compat.thinkingFormat !== 'deepseek' || compat.supportsReasoningEffort !== true) {
-          ops.push({
-            op: 'set',
-            path: ['providers', route],
-            value: { ...value, compat: { ...compat, thinkingFormat: 'deepseek', supportsReasoningEffort: true }, models },
-          })
-          continue
-        }
-      }
-      if (changed) ops.push({ op: 'set', path: ['providers', route], value: { ...value, models } })
     }
     if (ops.length) await ctx.settings.mutate(ns, ops)
   } catch { /* settings not ready; provision will write the corrected compat later */ }
@@ -184,7 +202,7 @@ export const inject = ['connection', 'credentials', 'settings']
 export function apply(ctx, config = {}) {
   const baseUrl = normaliseBaseUrl(config.baseUrl)
   const api = createApi(`${baseUrl}/api/v1`, fetch)
-  void migrateClaudeRoutes(ctx)
+  void migrateRelayRoutes(ctx)
 
   // Optional: routes whose reasoning channel should not be shown (an upstream model
   // that dumps draft answers / tool-call JSON into its CoT reads as noise).
@@ -330,7 +348,7 @@ export function apply(ctx, config = {}) {
     if (!groups.length) throw new Error('中转站当前没有可用的模型分组，请联系站长。')
     const plaza = await modelPlaza()
     const plazaById = new Map(plaza.map((entry) => [String(entry.id), entry]))
-    const plazaByName = new Map(plaza.map((entry) => [entry.name, entry]))
+    const plazaByName = new Map(plaza.map((entry) => [lookupName(entry.name), entry]))
     const keys = await listKeys()
 
     const imported = []
@@ -340,7 +358,7 @@ export function apply(ctx, config = {}) {
 
     for (const group of groups) {
       const groupName = group.name || String(group.id)
-      const plazaGroup = plazaById.get(String(group.id)) || plazaByName.get(groupName) || null
+      const plazaGroup = plazaById.get(String(group.id)) || plazaByName.get(lookupName(groupName)) || null
       const platform = String((plazaGroup && plazaGroup.platform) || group.platform || '').toLowerCase()
       const protocol = protocolFor(platform)
       if (protocol === 'gemini') {
@@ -356,7 +374,10 @@ export function apply(ctx, config = {}) {
         if (resolved) secret = resolved.value
       }
       if (!secret) {
-        const candidate = keys.find((entry) => entry.name === keyName(groupName))
+        const candidate = keys.find((entry) => {
+          const candidateGroupID = entry && (entry.group_id ?? (entry.group && entry.group.id))
+          return String(candidateGroupID || '') === String(group.id) && typeof entry.key === 'string' && entry.key && !/[*\u2026]/.test(entry.key)
+        }) || keys.find((entry) => entry.name === keyName(groupName))
         if (candidate && typeof candidate.key === 'string' && candidate.key && !/[*\u2026]/.test(candidate.key)) secret = candidate.key
       }
       if (!secret) {
@@ -369,6 +390,7 @@ export function apply(ctx, config = {}) {
           const record = createdKey || {}
           secret = typeof record === 'string' ? record : record.key
           if (!secret || /[*\u2026]/.test(secret)) throw Object.assign(new Error('中转站没有返回 Key 明文。'), { code: 'missing_secret' })
+          keys.push({ ...record, name, key: secret, group_id: group.id })
           created.push({ group: groupName, protocol })
         } catch (error) {
           failures.push({ group: groupName, code: error.code || 'key_create_failed', message: error.message })
@@ -378,7 +400,7 @@ export function apply(ctx, config = {}) {
       await ctx.credentials.set(ref, secret)
 
       const plazaModels = plazaGroup ? asArray(plazaGroup, 'models') : []
-      const modelIds = plazaModels.map((model) => (typeof model === 'string' ? model : model && model.name)).filter(Boolean)
+      const modelIds = uniqueModelIds(plazaModels)
       const fallback = modelIds.length ? [] : await modelsForKey(secret, protocol)
       // A chat route cannot serve video/image/TTS/embedding models; keep them out of the picker.
       const finalIds = (modelIds.length ? modelIds : fallback).filter((id) => !NON_CHAT_PATTERN.test(id))
@@ -388,18 +410,18 @@ export function apply(ctx, config = {}) {
       }
 
       const route = `${ROUTE_PREFIX}${slug(groupName)}`
+      const deepseek = finalIds.some(isDeepSeekModel) || /deepseek/i.test(groupName)
+      const claude = finalIds.some(isClaudeModel) || /(?:ccpro|ccmax|anthropic)/i.test(groupName)
+      const api = deepseek ? 'openai-responses' : claude ? 'anthropic-messages' : 'openai-completions'
       liveRoutes.add(route)
       imported.push({
         group: groupName,
         platform,
-        // The station's OpenAI bridge is the one path that turns Claude thinking into
-        // `reasoning_content`, keeps tool calls working, and is uniform across groups.
-        protocol: 'openai',
+        protocol: api,
         route,
         ref,
-        baseURL: `${baseUrl}/v1`,
-        api: 'openai-completions',
-        compat: { thinkingFormat: 'deepseek', supportsReasoningEffort: true },
+        baseURL: deepseek || claude ? relayOrigin(baseUrl) : ensureOpenAIBaseUrl(baseUrl),
+        api,
         models: finalIds,
       })
     }
@@ -420,8 +442,8 @@ export function apply(ctx, config = {}) {
         api: entry.api,
         baseURL: entry.baseURL,
         apiKeyEnv: entry.ref,
-        compat: entry.compat,
-        models: entry.models.map(modelProfile),
+        ...(entry.compat ? { compat: entry.compat } : {}),
+        models: normalizeModelProfiles(entry.models, entry.platform),
       },
     }))
 
@@ -517,4 +539,9 @@ export function apply(ctx, config = {}) {
   }))
 }
 
-export { ROUTE_PATH }
+export {
+  ensureOpenAIBaseUrl,
+  modelIdOf,
+  normalizeModelProfiles,
+  normalizeRelayProviderValue,
+}
