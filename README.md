@@ -46,12 +46,15 @@
 | ccpro组 | OpenAI Responses | claude-fable-5 / claude-opus-5-5 / claude-sonnet-5-5 |
 | ccmax组 | OpenAI Responses | 同上，独立渠道 |
 | DeepSeek | OpenAI Responses | deepseek-v4.1-flash-1017 |
+| gemini | OpenAI Chat Completions | gemini-4-argon / gemini-4-carbon |
 
-- 模型清单一律以站点「模型广场」为准，不会导入你用不了的模型；
-- 导入时已声明图片输入、100 万上下文、全档位推理强度，选模型即可用；
+- 模型清单一律以站点「模型广场」为准；
+- 导入时声明图片输入及模型推理档位，选模型即可用；
 - 视频类分组（如 seedance）不会进入对话模型列表。
 
-所有支持的分组固定导入为 OpenAI Responses 路由（`/v1/responses`），插件会统一使用站点根地址，让 DSH 自动拼接 Responses 端点。这样可以统一 Claude、DeepSeek 和 GPT 的请求体、流式事件与工具调用格式。DeepSeek 模型同步为 1M 上下文、384K 最大输出、文字和图片输入；Claude 与 GPT 同步为 1M 上下文、128K 最大输出、文字和图片输入。旧版本已经生成的 `qinghua-*` 路由会在插件加载时自动迁移。
+Claude、DeepSeek 和 GPT 分组使用 OpenAI Responses（`/v1/responses`），配置站点根地址，由 DSH 拼接端点。**Gemini 分组使用站点支持的 OpenAI Chat Completions（`/v1/chat/completions`）**，配置地址为 `https://qinghuaend.cn/v1`；不要求 DSH 支持 Gemini 原生协议，也不使用 Responses。Gemini 4 的推理强度提供 `low`、`high` 两档，工具调用与工具结果回传由站点兼容桥处理。上下文与输出长度是插件的请求配置，最终可用额度以上游限制为准。
+
+更新插件后，在「设置 → 中转站账户」点一次 **「同步分组与模型」**，插件会复用或创建 Gemini 分组 Key，并将模型加入「情话中转站 · gemini」。已有 Gemini 路由会在插件加载时修正协议和推理档位，不会被迁移成 Responses。
 
 ---
 

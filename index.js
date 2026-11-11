@@ -38,11 +38,25 @@ function normaliseBaseUrl(value) {
   return raw.replace(/\/+$/, '')
 }
 
-/** The relay exposes every supported chat group through its OpenAI Responses endpoint. */
-function protocolFor(platform) {
-  const value = String(platform || '').toLowerCase()
-  if (value.includes('gemini')) return 'gemini'
-  return 'openai-responses'
+/** Gemini uses the station's Chat Completions bridge; other groups use Responses. */
+function protocolFor(platform, models = [], route = '') {
+  return isGeminiGroup(platform, models, route) ? 'openai-completions' : 'openai-responses'
+}
+
+const GEMINI_MODEL_PATTERN = /(?:^|\/)gemini-/i
+const GEMINI_EFFORT_LEVELS = ['low', 'high']
+const GEMINI_COMPAT = {
+  thinkingFormat: 'openai',
+  supportsReasoningEffort: true,
+  supportsStore: false,
+  supportsUsageInStreaming: true,
+  maxTokensField: 'max_tokens',
+  requiresThinkingAsText: false,
+}
+function isGeminiGroup(platform, models = [], route = '') {
+  return /gemini/i.test(String(platform))
+    || /(?:^|-)gemini(?:-|$)/i.test(String(route))
+    || models.some((model) => GEMINI_MODEL_PATTERN.test(modelIdOf(model)))
 }
 
 const DEEPSEEK_MODEL_PATTERN = /(^|[\/:_-])deepseek([\/:_-]|$)/i
@@ -79,7 +93,8 @@ function asArray(value, ...keys) {
 }
 
 function modelProfile(modelId, platform = '') {
-  const levels = needsAdaptiveThinking(modelId) ? CLAUDE_EFFORT_LEVELS : REASONING_LEVELS
+  const gemini = isGeminiGroup(platform, [modelId])
+  const levels = gemini ? GEMINI_EFFORT_LEVELS : needsAdaptiveThinking(modelId) ? CLAUDE_EFFORT_LEVELS : REASONING_LEVELS
   const deepseek = String(platform).toLowerCase().includes('deepseek') || isDeepSeekModel(modelId)
   return {
     id: modelId,
@@ -105,13 +120,15 @@ function normalizeRelayProviderValue(route, value) {
   const models = Array.isArray(value.models) ? value.models : []
   const ids = uniqueModelIds(models)
   const deepseek = ids.some(isDeepSeekModel) || /deepseek/i.test(route)
+  const gemini = isGeminiGroup('', models, route)
   const normalized = {
     ...value,
-    api: 'openai-responses',
-    baseURL: relayOrigin(value.baseURL),
-    models: normalizeModelProfiles(models, deepseek ? 'deepseek' : ''),
+    api: protocolFor('', models, route),
+    baseURL: gemini ? ensureOpenAIBaseUrl(value.baseURL) : relayOrigin(value.baseURL),
+    models: normalizeModelProfiles(models, gemini ? 'gemini' : deepseek ? 'deepseek' : ''),
   }
-  delete normalized.compat
+  if (gemini) normalized.compat = { ...(value.compat || {}), ...GEMINI_COMPAT }
+  else delete normalized.compat
   return normalized
 }
 
@@ -164,10 +181,8 @@ function findPiAiNamespace(ctx) {
 const NON_CHAT_PATTERN = /seedance|sora|dall-?e|gpt-image|image-|imagen|tts|audio|whisper|transcri|embed|rerank|moderation|veo|kling/i
 
 /**
- * 老版本插件可能缺少 Claude 的自适应思考兼容标记。这里在加载时静默迁移：
- * DeepSeek 走站点 OpenAI Responses（`/v1/responses`）；Claude 分组走原生
- * Anthropic Messages（`/v1/messages`）并启用 adaptive thinking；GPT 分组走
- * OpenAI 兼容接口。
+ * Normalize older relay routes when loading the plugin. Gemini uses Chat Completions
+ * with its own reasoning levels; Claude, DeepSeek and GPT keep their Responses routes.
  */
 async function migrateRelayRoutes(ctx) {
   try {
@@ -348,11 +363,7 @@ export function apply(ctx, config = {}) {
       const groupName = group.name || String(group.id)
       const plazaGroup = plazaById.get(String(group.id)) || plazaByName.get(lookupName(groupName)) || null
       const platform = String((plazaGroup && plazaGroup.platform) || group.platform || '').toLowerCase()
-      const protocol = protocolFor(platform)
-      if (protocol === 'gemini') {
-        failures.push({ group: groupName, code: 'unsupported_platform', message: 'Gemini 分组暂不支持导入 DSH。' })
-        continue
-      }
+      const protocol = protocolFor(platform, plazaGroup ? asArray(plazaGroup, 'models') : [], groupName)
 
       const ref = credentialRef(groupName)
       let secret = null
@@ -398,8 +409,8 @@ export function apply(ctx, config = {}) {
       }
 
       const route = `${ROUTE_PREFIX}${slug(groupName)}`
-      const deepseek = finalIds.some(isDeepSeekModel) || /deepseek/i.test(groupName)
-      const api = 'openai-responses'
+      const api = protocolFor(platform, finalIds, groupName)
+      const gemini = api === 'openai-completions'
       liveRoutes.add(route)
       imported.push({
         group: groupName,
@@ -407,8 +418,9 @@ export function apply(ctx, config = {}) {
         protocol: api,
         route,
         ref,
-        baseURL: relayOrigin(baseUrl),
+        baseURL: gemini ? ensureOpenAIBaseUrl(baseUrl) : relayOrigin(baseUrl),
         api,
+        ...(gemini ? { compat: { ...GEMINI_COMPAT } } : {}),
         models: finalIds,
       })
     }
